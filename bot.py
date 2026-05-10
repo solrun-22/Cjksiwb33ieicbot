@@ -1,6 +1,5 @@
 import asyncio
 import re
-import os
 import sqlite3
 import time
 from datetime import datetime
@@ -12,19 +11,21 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
-from dotenv import load_dotenv
-import aiofiles
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup,
+    InlineKeyboardButton, FSInputFile
+)
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8721549582:AAEjWx3asUMppBgriWu_ppnFegDdPAlAATU")
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "-5219194459"))
-MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "8721549582"))
+# === ВСТАВЬ СВОИ ДАННЫЕ ЗДЕСЬ ===
+BOT_TOKEN = "8721549582:AAEjWx3asUMppBgriWu_ppnFegDdPAlAATU"
+ADMIN_GROUP_ID = -5219194459  # ID группы (с минусом если группа)
+MAIN_ADMIN_ID = 8721549582
+# ===============================
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+# База данных
 conn = sqlite3.connect("anonymous_chat.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -89,7 +90,7 @@ CREATE TABLE IF NOT EXISTS config (
 )
 """)
 
-cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('admin_group_id', ?)", (ADMIN_GROUP_ID,))
+cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('admin_group_id', ?)", (str(ADMIN_GROUP_ID),))
 cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('next_chat_num', '1')")
 conn.commit()
 
@@ -119,14 +120,10 @@ class BroadcastState(StatesGroup):
     waiting_text = State()
     waiting_photo = State()
 
-def set_admin_group(group_id: int):
-    cursor.execute("UPDATE config SET value = ? WHERE key = 'admin_group_id'", (str(group_id),))
-    conn.commit()
-
 def get_admin_group() -> int:
     cursor.execute("SELECT value FROM config WHERE key = 'admin_group_id'")
     res = cursor.fetchone()
-    return int(res[0]) if res and res[0] != '0' else ADMIN_GROUP_ID
+    return int(res[0]) if res else ADMIN_GROUP_ID
 
 def get_next_chat_num() -> int:
     cursor.execute("SELECT value FROM config WHERE key = 'next_chat_num'")
@@ -176,22 +173,6 @@ def check_spam(user_id: int, text: str) -> bool:
     user_msg_history[user_id].append((text, now))
     return False
 
-def add_warning(user_id: int):
-    cursor.execute("SELECT warnings, banned_until, perm_banned FROM users WHERE user_id = ?", (user_id,))
-    res = cursor.fetchone()
-    if not res:
-        return
-    warnings, banned_until, perm_banned = res
-    if perm_banned or banned_until > time.time():
-        return
-    warnings += 1
-    if warnings >= 3:
-        banned_until = int(time.time() + 7 * 86400)
-        cursor.execute("UPDATE users SET warnings = ?, banned_until = ? WHERE user_id = ?", (warnings, banned_until, user_id))
-    else:
-        cursor.execute("UPDATE users SET warnings = ? WHERE user_id = ?", (warnings, user_id))
-    conn.commit()
-
 def save_chat_history(chat_num: int, user1: int, user2: int, messages: str):
     filename = f"chat_{chat_num}_{user1}_{user2}_{int(time.time())}.txt"
     async def send():
@@ -200,6 +181,7 @@ def save_chat_history(chat_num: int, user1: int, user2: int, messages: str):
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(f"ЧАТ #{chat_num}\nПользователь1: {user1}\nПользователь2: {user2}\n\n{messages}")
             await bot.send_document(admin_group, FSInputFile(filename), caption=f"📝 История чата #{chat_num}")
+            import os
             os.remove(filename)
     asyncio.create_task(send())
 
@@ -451,6 +433,7 @@ async def finalize_report(message: types.Message, state: FSMContext):
             [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{chat_num}")]
         ])
         await bot.send_document(admin_group, FSInputFile(filename), caption=f"⚠️ #reports #id={partner} #chat_id={chat_num}\n{reason}", reply_markup=kb)
+        import os
         os.remove(filename)
         for photo in photos:
             await bot.send_photo(admin_group, photo)
@@ -505,6 +488,14 @@ async def cmd_help_admin(message: types.Message):
         return
     await message.answer("/profile [ID] — пробив\n/forcechat [ID] — чат с пользователем\n/broadcast — рассылка (гл.админ)\n/setname — имя бота (гл.админ)\n/preban — пребан (гл.админ)")
 
+@dp.message(Command("add_admin_group"))
+async def cmd_add_admin_group(message: types.Message):
+    if not is_main_admin(message.from_user.id):
+        return
+    admin_group = message.chat.id
+    cursor.execute("UPDATE config SET value = ? WHERE key = 'admin_group_id'", (str(admin_group),))
+    conn.commit()
+    awa
 @dp.message(Command("add_admin_group"))
 async def cmd_add_admin_group(message: types.Message):
     if not is_main_admin(message.from_user.id):
